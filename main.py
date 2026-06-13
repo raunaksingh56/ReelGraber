@@ -18,6 +18,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+from telegram.request import HTTPXRequest
 
 from config import BOT_TOKEN, COOKIES_FILE, DOWNLOAD_DIR, MAX_FILE_SIZE_MB
 from downloader import DownloadError, ReelDownloader, extract_url
@@ -183,13 +184,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 caption="🎬 Here's your Reel in the best available quality!\n\n— *ReelGraber*",
                 parse_mode=ParseMode.MARKDOWN,
                 supports_streaming=True,
+                # Uploading video can take much longer than the default
+                # ~5s HTTP timeout, especially on slower mobile connections
+                # (e.g. Termux on cellular data). Give it plenty of room.
+                read_timeout=120,
+                write_timeout=180,
+                connect_timeout=60,
+                pool_timeout=60,
             )
         await status_msg.delete()
     except Exception as exc:  # noqa: BLE001
-        logger.error("Upload failed for %s: %s", url, exc)
+        logger.error("Upload failed for %s: %s", url, exc, exc_info=True)
         await status_msg.edit_text(
-            "❌ The video downloaded fine, but I couldn't send it back to you. "
-            "Please try again.",
+            f"❌ The video downloaded fine, but I couldn't send it back to you.\n\n"
+            f"Reason: `{type(exc).__name__}: {exc}`\n\n"
+            "This is often a network timeout — please try again.",
             parse_mode=ParseMode.MARKDOWN,
         )
     finally:
@@ -204,7 +213,28 @@ def main() -> None:
             "and add your Telegram bot token."
         )
 
-    app = Application.builder().token(BOT_TOKEN).build()
+    # Default timeouts (~5s) are too short for video uploads/downloads,
+    # especially on mobile connections (e.g. Termux on cellular data).
+    request = HTTPXRequest(
+        connect_timeout=30.0,
+        read_timeout=60.0,
+        write_timeout=120.0,
+        pool_timeout=60.0,
+    )
+    # getUpdates long-polling needs its own (longer) read timeout.
+    get_updates_request = HTTPXRequest(
+        connect_timeout=30.0,
+        read_timeout=40.0,
+        pool_timeout=60.0,
+    )
+
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .request(request)
+        .get_updates_request(get_updates_request)
+        .build()
+    )
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
@@ -227,3 +257,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+                
