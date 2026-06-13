@@ -19,7 +19,7 @@ BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
 # Telegram Bot token (get one from @BotFather on Telegram)
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8901442246:AAG9XCSWKz_TwWpJTYjjuXMoM8p0EQompUA")
 
 # Folder where reels are temporarily downloaded before being sent.
 # Relative paths are resolved against the project root.
