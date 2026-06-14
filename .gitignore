@@ -1,0 +1,34 @@
+# --- Secrets & sensitive files ---
+.env
+cookies.txt
+
+# --- Downloaded media (temporary) ---
+downloads/
+*.mp4
+*.mkv
+*.webm
+*.jpg
+*.jpeg
+*.png
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+
+# --- Virtual environments ---
+venv/
+.venv/
+env/
+
+# --- Logs ---
+*.log
+
+# --- OS / editor junk ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
