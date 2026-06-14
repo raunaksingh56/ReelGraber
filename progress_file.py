@@ -1,16 +1,49 @@
 """
-Small helper to render a clean, unique-looking text progress bar
-that works inside Telegram messages (no images needed).
+Small helper used to show a live "Uploading..." progress bar.
+
+Wraps a file on disk so that every time python-telegram-bot/httpx reads a
+chunk of it (while streaming the upload to Telegram's servers), we get a
+callback with the percentage uploaded so far.
 """
 
+import os
+from typing import Callable
 
-def make_progress_bar(percent: float, length: int = 18) -> str:
+
+class ProgressFile:
     """
-    Render a progress bar like: [█████████░░░░░░░░░] 52.3%
-    percent: 0-100
-    length: total number of characters in the bar
+    A read-only, file-like wrapper around a path on disk.
+
+    Each call to .read() forwards to the underlying file and reports
+    cumulative progress via `callback(percent)`, where percent is a
+    float from 0.0 to 100.0.
     """
-    percent = max(0.0, min(100.0, percent))
-    filled = int(length * percent / 100)
-    bar = "█" * filled + "░" * (length - filled)
-    return f"`[{bar}]` *{percent:5.1f}%*"
+
+    def __init__(self, path: str, callback: Callable[[float], None]):
+        self._file = open(path, "rb")
+        self._total = os.path.getsize(path)
+        self._read_bytes = 0
+        self._callback = callback
+
+    def read(self, size: int = -1) -> bytes:
+        chunk = self._file.read(size)
+        self._read_bytes += len(chunk)
+        if self._total:
+            percent = min(100.0, self._read_bytes / self._total * 100)
+            try:
+                self._callback(percent)
+            except Exception:
+                pass
+        return chunk
+
+    def __getattr__(self, item):
+        return getattr(self._file, item)
+
+    def close(self) -> None:
+        self._file.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.close()
