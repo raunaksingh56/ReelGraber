@@ -23,6 +23,7 @@ from telegram.request import HTTPXRequest
 from config import BOT_TOKEN, COOKIES_FILE, DOWNLOAD_DIR, MAX_FILE_SIZE_MB
 from downloader import DownloadError, ReelDownloader, extract_url
 from progress_bar import make_progress_bar
+from progress_file import ProgressFile
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -172,28 +173,55 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         os.remove(filepath)
         return
 
-    await status_msg.edit_text(
-        f"✅ *Download complete!* {make_progress_bar(100)}\n\n📤 Uploading to Telegram...",
-        parse_mode=ParseMode.MARKDOWN,
-    )
+    # --- Upload with a live progress bar ---
+    upload_state = {"percent": 0.0, "done": False, "error": None}
 
-    try:
-        with open(filepath, "rb") as video_file:
-            await update.message.reply_video(
-                video=video_file,
-                caption="🎬 Here's your Reel in the best available quality!\n\n— *ReelGraber*",
-                parse_mode=ParseMode.MARKDOWN,
-                supports_streaming=True,
-                # Uploading video can take much longer than the default
-                # ~5s HTTP timeout, especially on slower mobile connections
-                # (e.g. Termux on cellular data). Give it plenty of room.
-                read_timeout=120,
-                write_timeout=180,
-                connect_timeout=60,
-                pool_timeout=60,
-            )
-        await status_msg.delete()
-    except Exception as exc:  # noqa: BLE001
+    def upload_progress(percent: float) -> None:
+        upload_state["percent"] = percent
+
+    async def run_upload() -> None:
+        try:
+            with ProgressFile(filepath, upload_progress) as video_file:
+                await update.message.reply_video(
+                    video=video_file,
+                    filename=os.path.basename(filepath),
+                    caption="🎬 Here's your Reel in the best available quality!\n\n— *ReelGraber*",
+                    parse_mode=ParseMode.MARKDOWN,
+                    supports_streaming=True,
+                    # Uploading video can take much longer than the default
+                    # ~5s HTTP timeout, especially on slower mobile connections
+                    # (e.g. Termux on cellular data). Give it plenty of room.
+                    read_timeout=120,
+                    write_timeout=180,
+                    connect_timeout=60,
+                    pool_timeout=60,
+                )
+        except Exception as exc:  # noqa: BLE001
+            upload_state["error"] = exc
+        finally:
+            upload_state["done"] = True
+
+    upload_task = asyncio.create_task(run_upload())
+
+    # Live-update the status message while the upload runs
+    last_rendered = ""
+    while not upload_state["done"]:
+        bar = make_progress_bar(upload_state["percent"])
+        rendered = f"📤 *Uploading to Telegram...*\n\n{bar}"
+
+        if rendered != last_rendered:
+            try:
+                await status_msg.edit_text(rendered, parse_mode=ParseMode.MARKDOWN)
+                last_rendered = rendered
+            except Exception:
+                pass  # ignore "message not modified" / rate-limit edits
+
+        await asyncio.sleep(1.0)
+
+    await upload_task
+
+    if upload_state["error"]:
+        exc = upload_state["error"]
         logger.error("Upload failed for %s: %s", url, exc, exc_info=True)
         await status_msg.edit_text(
             f"❌ The video downloaded fine, but I couldn't send it back to you.\n\n"
@@ -201,9 +229,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             "This is often a network timeout — please try again.",
             parse_mode=ParseMode.MARKDOWN,
         )
-    finally:
-        if os.path.exists(filepath):
-            os.remove(filepath)
+    else:
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+
+    if os.path.exists(filepath):
+        os.remove(filepath)
 
 
 def main() -> None:
@@ -257,4 +290,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-                
+
+    
